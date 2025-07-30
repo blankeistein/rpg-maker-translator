@@ -47,7 +47,7 @@ async function translateWithLingva(textToTranslate) {
         const apiUrl =
             ENDPOINTS[0] +
             "/auto/" +
-            targetLanguage.value +
+            "id" +
             "/" +
             encodeURIComponent(protectedText);
         const response = await fetch(apiUrl);
@@ -302,8 +302,8 @@ function restoreRpgMakerCodes(inputText, codeMap) {
     }
 }
 
-function setTextInJson(path, newText) {
-    let parentNode = workingJson;
+function setTextInJson(data, path, newText) {
+    let parentNode = data;
     try {
         for (let i = 0; i < path.length - 1; i++) {
             const segment = path[i];
@@ -354,6 +354,8 @@ export {
     getCommandCodeFromPath,
     protectRpgMakerCodes,
     restoreRpgMakerCodes,
+    translateWithLingva,
+    setTextInJson,
     TRANSLATABLE_COMMANDS,
     PROTECTED_COMMANDS,
 };

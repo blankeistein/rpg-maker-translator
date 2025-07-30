@@ -19,7 +19,11 @@ import { useDropzone } from "react-dropzone";
 import { Toaster } from "react-hot-toast";
 import CardJson from "./CardJson";
 import languages from "./translator/languages";
-import { extractTextsFromJson } from "./translator/rpgm";
+import {
+    extractTextsFromJson,
+    setTextInJson,
+    translateWithLingva,
+} from "./translator/rpgm";
 
 const URL = "https://lingva.lunar.icu/api/v1/auto/en/";
 
@@ -125,37 +129,28 @@ export default function App() {
         );
     }, []);
 
-    const handleProcess = () => {
+    const handleProcess = async () => {
+        if (containerJson.length === 0) return;
         setStateProcess(STATE_PROCESS.RUNNING);
-    };
+        for (const item of containerJson) {
+            const readFile = await readFileAsText(item.file);
+            const json = JSON.parse(readFile);
+            console.log(json);
 
-    const handleClickButton = useCallback(() => {
-        if (stateProcess === STATE_PROCESS.PAUSE) {
-            setStateProcess(STATE_PROCESS.RUNNING);
-        } else if (stateProcess === STATE_PROCESS.RUNNING) {
-            setStateProcess(STATE_PROCESS.PAUSE);
-        } else {
-            setStateProcess(STATE_PROCESS.RUNNING);
+            const texts = extractTextsFromJson(json);
+            for (const text of texts) {
+                const translatedText = await translateWithLingva(text.text);
+                setTextInJson(json, text.path, translatedText);
+                console.log(text);
+                break;
+            }
+
+            const jsonString = JSON.stringify(json);
+            const newFile = new File([jsonString], item.file.name, {
+                type: item.file.type,
+            });
         }
-
-        // const reader = new FileReader();
-        // reader.onload = function (event) {
-        //     try {
-        //         const jsonData = JSON.parse(event.target.result);
-        //         const extractedText = extractTextsFromJson(jsonData);
-
-        //         for (const text of extractedText) {
-        //             const protectedText = protectRpgMakerCodes(text.text);
-
-        //             console.log(protectedText);
-        //         }
-        //     } catch (e) {
-        //         toast.error(e.message);
-        //     }
-        // };
-
-        // reader.readAsText(containerJson[0]);
-    }, [stateProcess, containerJson]);
+    };
 
     return (
         <div className="w-full min-h-screen bg-background">
@@ -305,7 +300,7 @@ export default function App() {
                                             ? "success"
                                             : "info"
                                     }
-                                    onClick={handleClickButton}
+                                    onClick={handleProcess}
                                 >
                                     {stateProcess === STATE_PROCESS.RUNNING ? (
                                         <PauseIcon className="size-4 mr-1" />
