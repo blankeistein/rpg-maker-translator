@@ -38,30 +38,69 @@ async function processLingvaTranslation() {
     setTimeout(processLingvaTranslation, 500);
 }
 
-async function translateWithLingva(textToTranslate) {
+async function translateWithLingva(
+    textToTranslate,
+    { source = "auto", target }
+) {
     if (!textToTranslate || typeof textToTranslate !== "string") {
-        throw new Error("Invalid text to translate");
+        throw new Error(
+            "Invalid text to translate: input must be a non-empty string."
+        );
     }
+
+    if (!target) {
+        throw new Error(
+            "Invalid target language: target language must be specified."
+        );
+    }
+
     try {
         const { protectedText, codes } = protectRpgMakerCodes(textToTranslate);
-        const apiUrl =
-            ENDPOINTS[0] +
-            "/auto/" +
-            "id" +
-            "/" +
-            encodeURIComponent(protectedText);
-        const response = await fetch(apiUrl);
-        if (!response.ok) {
-            throw new Error("API Error: " + response.status);
+        let lastError = null;
+
+        for (const endpoint of ENDPOINTS) {
+            try {
+                const apiUrl =
+                    endpoint +
+                    "/" +
+                    source +
+                    "/" +
+                    target +
+                    "/" +
+                    encodeURIComponent(protectedText);
+
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    // Jika respons tidak OK (misal 404, 500), anggap ini error dan coba endpoint lain
+                    const errorDetail = response.statusText || "Unknown status";
+                    throw new Error(
+                        `Endpoint ${endpoint} failed with status: ${response.status} (${errorDetail})`
+                    );
+                }
+
+                const apiData = await response.json();
+                if (!apiData || !apiData.translation) {
+                    throw new Error(
+                        `Invalid response format from endpoint ${endpoint}: missing translation data.`
+                    );
+                }
+
+                let translatedText = apiData.translation.trim();
+                translatedText = restoreRpgMakerCodes(translatedText, codes);
+                translatedText = translatedText.replace(/\s+/g, " ").trim();
+                return translatedText;
+            } catch (error) {
+                console.error(
+                    `❌ failed endpoint ${endpoint}: ${error.message}`
+                );
+                lastError = error;
+            }
         }
-        const apiData = await response.json();
-        if (!apiData || !apiData.translation) {
-            throw new Error("Invalid response from Lingva");
-        }
-        let translatedText = apiData.translation.trim();
-        translatedText = restoreRpgMakerCodes(translatedText, codes);
-        translatedText = translatedText.replace(/\s+/g, " ").trim();
-        return translatedText;
+
+        throw new Error(
+            "Failed to connect to any available Lingva translation service.",
+            { cause: lastError }
+        );
     } catch (error) {
         console.error("Lingva translation failed:", error);
         throw new Error("Lingva translation failed: " + error.message);

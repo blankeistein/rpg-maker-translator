@@ -5,18 +5,20 @@ import {
     Select,
     Typography,
 } from "@material-tailwind/react";
+import Bottleneck from "bottleneck";
 import clsx from "clsx";
 import {
     BookAIcon,
+    DownloadIcon,
     MoonIcon,
     PauseIcon,
     PlayIcon,
     SunIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Toaster } from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 import CardJson from "./CardJson";
 import languages from "./translator/languages";
 import {
@@ -24,8 +26,6 @@ import {
     setTextInJson,
     translateWithLingva,
 } from "./translator/rpgm";
-
-const URL = "https://lingva.lunar.icu/api/v1/auto/en/";
 
 const STATE_PROCESS = {
     START: 0,
@@ -69,8 +69,8 @@ export default function App() {
     const [darkMode, setDarkMode] = useState(false);
     const [stateProcess, setStateProcess] = useState(STATE_PROCESS.START);
     const [options, setOptions] = useState({
-        from: "auto",
-        to: "",
+        source: "auto",
+        target: "",
     });
 
     const onDrop = useCallback(async (acceptedFile) => {
@@ -131,26 +131,90 @@ export default function App() {
 
     const handleProcess = async () => {
         if (containerJson.length === 0) return;
+
+        const { source, target } = options;
+
+        if (!source) {
+            toast.error("Choose source language");
+            return;
+        }
+
+        if (!target) {
+            toast.error("Choose target language");
+            return;
+        }
+
         setStateProcess(STATE_PROCESS.RUNNING);
-        for (const item of containerJson) {
+
+        for (const [index, item] of containerJson.entries()) {
             const readFile = await readFileAsText(item.file);
             const json = JSON.parse(readFile);
-            console.log(json);
 
             const texts = extractTextsFromJson(json);
+            const translateQueue = new Bottleneck({
+                maxConcurrent: 5,
+                minTime: 500,
+            });
+
             for (const text of texts) {
-                const translatedText = await translateWithLingva(text.text);
-                setTextInJson(json, text.path, translatedText);
-                console.log(text);
-                break;
+                translateQueue
+                    .schedule(async () => {
+                        const translatedText = await translateWithLingva(
+                            text.text,
+                            {
+                                source,
+                                target,
+                            }
+                        );
+                        return translatedText;
+                    })
+                    .then((result) => {
+                        setTextInJson(json, text.path, result);
+                    })
+                    .catch((error) => console.error(error));
             }
 
-            const jsonString = JSON.stringify(json);
-            const newFile = new File([jsonString], item.file.name, {
-                type: item.file.type,
+            translateQueue.on("done", function () {
+                setTimeout(() => {
+                    const stringJson = JSON.stringify(json);
+                    const newFile = new File([stringJson], item.file.name, {
+                        type: "application/json",
+                    });
+                    setContainerJson((prev) =>
+                        prev.map((json, currentIndex) => {
+                            if (currentIndex === index) {
+                                return { ...json, translatedFile: newFile };
+                            }
+
+                            return json;
+                        })
+                    );
+                }, 200);
             });
         }
+
+        setStateProcess(STATE_PROCESS.START);
+        toast.success("Success translated");
     };
+
+    const sortedLanguages = useMemo(() => {
+        return Object.entries(languages).sort((a, b) => {
+            // console.log(a, b);
+            return a[1].localeCompare(b[1]);
+        });
+    }, [languages]);
+
+    const handleDownloadAll = useCallback(() => {
+        const link = document.createElement("a");
+        for (const json of containerJson) {
+            if (!json.translatedFile) {
+                continue;
+            }
+            link.href = URL.createObjectURL(json.translatedFile);
+            link.download = json.translatedFile.name;
+            link.click();
+        }
+    }, [containerJson]);
 
     return (
         <div className="w-full min-h-screen bg-background">
@@ -213,6 +277,7 @@ export default function App() {
                                             filename={json.file.name}
                                             size={json.file.size}
                                             file={json.file}
+                                            translatedFile={json.translatedFile}
                                             textCount={json.textCount}
                                             onDelete={handleRemoveFile}
                                         />
@@ -230,13 +295,14 @@ export default function App() {
                                         Source
                                     </Typography>
                                     <Select
-                                        value={options.from}
-                                        onValueChange={(value) =>
+                                        value={options.source}
+                                        onValueChange={(value) => {
+                                            console.log(value);
                                             setOptions((prev) => ({
                                                 ...prev,
-                                                from: value,
-                                            }))
-                                        }
+                                                source: value,
+                                            }));
+                                        }}
                                     >
                                         <Select.Trigger
                                             id="sourceLang"
@@ -246,9 +312,12 @@ export default function App() {
                                             <Select.Option value="auto">
                                                 Auto Detect
                                             </Select.Option>
-                                            {Object.entries(languages).map(
+                                            {sortedLanguages.map(
                                                 ([key, value]) => (
-                                                    <Select.Option key={key}>
+                                                    <Select.Option
+                                                        key={key}
+                                                        value={key}
+                                                    >
                                                         {value}
                                                     </Select.Option>
                                                 )
@@ -265,11 +334,11 @@ export default function App() {
                                         Target
                                     </Typography>
                                     <Select
-                                        value={options.to}
+                                        value={options.target}
                                         onValueChange={(value) =>
                                             setOptions((prev) => ({
                                                 ...prev,
-                                                to: value,
+                                                target: value,
                                             }))
                                         }
                                     >
@@ -278,9 +347,12 @@ export default function App() {
                                             placeholder="Choose Language"
                                         />
                                         <Select.List className="h-72 overflow-auto">
-                                            {Object.entries(languages).map(
+                                            {sortedLanguages.map(
                                                 ([key, value]) => (
-                                                    <Select.Option key={key}>
+                                                    <Select.Option
+                                                        key={key}
+                                                        value={key}
+                                                    >
                                                         {value}
                                                     </Select.Option>
                                                 )
@@ -289,9 +361,9 @@ export default function App() {
                                     </Select>
                                 </div>
                             </div>
-                            <div className="flex items-center">
+                            <div className="flex justify-stretch items-center gap-2">
                                 <Button
-                                    className="w-full"
+                                    className="grow"
                                     color={
                                         stateProcess === STATE_PROCESS.RUNNING
                                             ? "warning"
@@ -301,6 +373,9 @@ export default function App() {
                                             : "info"
                                     }
                                     onClick={handleProcess}
+                                    disabled={
+                                        stateProcess === STATE_PROCESS.RUNNING
+                                    }
                                 >
                                     {stateProcess === STATE_PROCESS.RUNNING ? (
                                         <PauseIcon className="size-4 mr-1" />
@@ -312,6 +387,14 @@ export default function App() {
                                         : stateProcess === STATE_PROCESS.PAUSE
                                         ? "Resume"
                                         : "Start"}
+                                </Button>
+                                <Button
+                                    className="grow"
+                                    disabled={containerJson.length === 0}
+                                    onClick={handleDownloadAll}
+                                >
+                                    <DownloadIcon className="size-4 mr-1" />
+                                    Download All
                                 </Button>
                             </div>
                         </div>

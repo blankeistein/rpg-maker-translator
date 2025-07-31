@@ -9,18 +9,29 @@ const CardJson = memo(function ({
     file,
     size,
     textCount,
-    translateFile,
+    translatedFile,
     onDelete,
 }) {
     const handleRemoveFile = () => {
         onDelete(index);
     };
 
+    const handleDownload = () => {
+        const downloadLink = document.createElement("a");
+        downloadLink.href = URL.createObjectURL(translatedFile);
+        downloadLink.download = translatedFile.name;
+        downloadLink.click();
+    };
+
     return (
         <Card className="relative flex flex-col min-h-[240px]">
             <Card.Header className="flex flex-col grow">
                 <div className="flex justify-end gap-1 mb-1">
-                    <IconButton variant="ghost" disabled>
+                    <IconButton
+                        variant="ghost"
+                        disabled={Boolean(!translatedFile)}
+                        onClick={handleDownload}
+                    >
                         <DownloadIcon className="text-success" />
                     </IconButton>
                     <IconButton variant="ghost" onClick={handleRemoveFile}>
