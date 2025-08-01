@@ -5,27 +5,22 @@ import {
     Select,
     Typography,
 } from "@material-tailwind/react";
-import Bottleneck from "bottleneck";
 import clsx from "clsx";
 import {
     BookAIcon,
     DownloadIcon,
     MoonIcon,
-    PauseIcon,
-    PlayIcon,
     SunIcon,
+    TrashIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import toast, { Toaster } from "react-hot-toast";
+import { Toaster } from "react-hot-toast";
 import CardJson from "./CardJson";
 import languages from "./translator/languages";
-import {
-    extractTextsFromJson,
-    setTextInJson,
-    translateWithLingva,
-} from "./translator/rpgm";
+import { extractTextsFromJson } from "./translator/rpgm";
+import { readFileAsText } from "./utils";
 
 const STATE_PROCESS = {
     START: 0,
@@ -33,41 +28,9 @@ const STATE_PROCESS = {
     PAUSE: 2,
 };
 
-const toggleMode = () => {
-    if ("localStorage" in window) {
-        if (document.documentElement.classList.contains("dark")) {
-            window.localStorage.removeItem("darkMode");
-        } else {
-            window.localStorage.setItem("darkMode", true);
-        }
-    } else {
-        alert("Tema tidak bisa disimpan, karena browser anda tidak mendukung");
-    }
-    document.documentElement.classList.toggle("dark");
-};
-
-/**
- *
- * @param {Blob} file
- */
-function readFileAsText(file) {
-    return new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = function (event) {
-            try {
-                res(event.target.result);
-            } catch (e) {
-                rej(e.message);
-            }
-        };
-        reader.readAsText(file);
-    });
-}
-
 export default function App() {
     const [containerJson, setContainerJson] = useState([]);
     const [darkMode, setDarkMode] = useState(false);
-    const [stateProcess, setStateProcess] = useState(STATE_PROCESS.START);
     const [options, setOptions] = useState({
         source: "auto",
         target: "",
@@ -117,7 +80,6 @@ export default function App() {
     }, []);
 
     const handleRemoveFile = useCallback((index) => {
-        console.log(index);
         setContainerJson((prev) =>
             prev.filter((_, key) => {
                 if (key === index) {
@@ -128,74 +90,6 @@ export default function App() {
             })
         );
     }, []);
-
-    const handleProcess = async () => {
-        if (containerJson.length === 0) return;
-
-        const { source, target } = options;
-
-        if (!source) {
-            toast.error("Choose source language");
-            return;
-        }
-
-        if (!target) {
-            toast.error("Choose target language");
-            return;
-        }
-
-        setStateProcess(STATE_PROCESS.RUNNING);
-
-        for (const [index, item] of containerJson.entries()) {
-            const readFile = await readFileAsText(item.file);
-            const json = JSON.parse(readFile);
-
-            const texts = extractTextsFromJson(json);
-            const translateQueue = new Bottleneck({
-                maxConcurrent: 5,
-                minTime: 500,
-            });
-
-            for (const text of texts) {
-                translateQueue
-                    .schedule(async () => {
-                        const translatedText = await translateWithLingva(
-                            text.text,
-                            {
-                                source,
-                                target,
-                            }
-                        );
-                        return translatedText;
-                    })
-                    .then((result) => {
-                        setTextInJson(json, text.path, result);
-                    })
-                    .catch((error) => console.error(error));
-            }
-
-            translateQueue.on("done", function () {
-                setTimeout(() => {
-                    const stringJson = JSON.stringify(json);
-                    const newFile = new File([stringJson], item.file.name, {
-                        type: "application/json",
-                    });
-                    setContainerJson((prev) =>
-                        prev.map((json, currentIndex) => {
-                            if (currentIndex === index) {
-                                return { ...json, translatedFile: newFile };
-                            }
-
-                            return json;
-                        })
-                    );
-                }, 200);
-            });
-        }
-
-        setStateProcess(STATE_PROCESS.START);
-        toast.success("Success translated");
-    };
 
     const sortedLanguages = useMemo(() => {
         return Object.entries(languages).sort((a, b) => {
@@ -215,6 +109,29 @@ export default function App() {
             link.click();
         }
     }, [containerJson]);
+
+    const handleUpdateJson = useCallback((index, data) => {
+        setContainerJson((prev) =>
+            prev.map((item, current) => {
+                if (current == index) {
+                    return { ...item, ...data };
+                }
+                return item;
+            })
+        );
+    }, []);
+
+    const handleRemoveZeroText = useCallback(() => {
+        setContainerJson((prev) =>
+            prev.filter((item) => {
+                if (item.textCount == 0) {
+                    return false;
+                }
+
+                return true;
+            })
+        );
+    }, []);
 
     return (
         <div className="w-full min-h-screen bg-background">
@@ -240,6 +157,78 @@ export default function App() {
                             <BookAIcon className="size-5" />
                             Translator
                         </Typography>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+                            <div className="w-full space-y-1">
+                                <Typography
+                                    as="label"
+                                    htmlFor="sourceLang"
+                                    className="font-semibold"
+                                >
+                                    Source
+                                </Typography>
+                                <Select
+                                    value={options.source}
+                                    onValueChange={(value) => {
+                                        console.log(value);
+                                        setOptions((prev) => ({
+                                            ...prev,
+                                            source: value,
+                                        }));
+                                    }}
+                                >
+                                    <Select.Trigger
+                                        id="sourceLang"
+                                        placeholder="Choose Language"
+                                    />
+                                    <Select.List className="h-72 overflow-auto">
+                                        <Select.Option value="auto">
+                                            Auto Detect
+                                        </Select.Option>
+                                        {sortedLanguages.map(([key, value]) => (
+                                            <Select.Option
+                                                key={key}
+                                                value={key}
+                                            >
+                                                {value}
+                                            </Select.Option>
+                                        ))}
+                                    </Select.List>
+                                </Select>
+                            </div>
+                            <div className="w-full space-y-1">
+                                <Typography
+                                    as="label"
+                                    htmlFor="targetLang"
+                                    className="font-semibold"
+                                >
+                                    Target
+                                </Typography>
+                                <Select
+                                    value={options.target}
+                                    onValueChange={(value) =>
+                                        setOptions((prev) => ({
+                                            ...prev,
+                                            target: value,
+                                        }))
+                                    }
+                                >
+                                    <Select.Trigger
+                                        id="targetLang"
+                                        placeholder="Choose Language"
+                                    />
+                                    <Select.List className="h-72 overflow-auto">
+                                        {sortedLanguages.map(([key, value]) => (
+                                            <Select.Option
+                                                key={key}
+                                                value={key}
+                                            >
+                                                {value}
+                                            </Select.Option>
+                                        ))}
+                                    </Select.List>
+                                </Select>
+                            </div>
+                        </div>
                         <div className="flex flex-col gap-2">
                             <Typography
                                 as="label"
@@ -269,7 +258,7 @@ export default function App() {
                                 )}
                             </motion.div>
                             {containerJson && (
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 flex-wrap gap-2 max-h-64 overflow-auto">
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 flex-wrap gap-2 max-h-80 overflow-auto">
                                     {containerJson.map((json, index) => (
                                         <CardJson
                                             key={index + json.file.name}
@@ -279,115 +268,15 @@ export default function App() {
                                             file={json.file}
                                             translatedFile={json.translatedFile}
                                             textCount={json.textCount}
+                                            download={json.download}
+                                            onUpdate={handleUpdateJson}
                                             onDelete={handleRemoveFile}
                                         />
                                     ))}
                                 </div>
                             )}
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-                                <div className="w-full space-y-1">
-                                    <Typography
-                                        as="label"
-                                        htmlFor="sourceLang"
-                                        className="font-semibold"
-                                    >
-                                        Source
-                                    </Typography>
-                                    <Select
-                                        value={options.source}
-                                        onValueChange={(value) => {
-                                            console.log(value);
-                                            setOptions((prev) => ({
-                                                ...prev,
-                                                source: value,
-                                            }));
-                                        }}
-                                    >
-                                        <Select.Trigger
-                                            id="sourceLang"
-                                            placeholder="Choose Language"
-                                        />
-                                        <Select.List className="h-72 overflow-auto">
-                                            <Select.Option value="auto">
-                                                Auto Detect
-                                            </Select.Option>
-                                            {sortedLanguages.map(
-                                                ([key, value]) => (
-                                                    <Select.Option
-                                                        key={key}
-                                                        value={key}
-                                                    >
-                                                        {value}
-                                                    </Select.Option>
-                                                )
-                                            )}
-                                        </Select.List>
-                                    </Select>
-                                </div>
-                                <div className="w-full space-y-1">
-                                    <Typography
-                                        as="label"
-                                        htmlFor="targetLang"
-                                        className="font-semibold"
-                                    >
-                                        Target
-                                    </Typography>
-                                    <Select
-                                        value={options.target}
-                                        onValueChange={(value) =>
-                                            setOptions((prev) => ({
-                                                ...prev,
-                                                target: value,
-                                            }))
-                                        }
-                                    >
-                                        <Select.Trigger
-                                            id="targetLang"
-                                            placeholder="Choose Language"
-                                        />
-                                        <Select.List className="h-72 overflow-auto">
-                                            {sortedLanguages.map(
-                                                ([key, value]) => (
-                                                    <Select.Option
-                                                        key={key}
-                                                        value={key}
-                                                    >
-                                                        {value}
-                                                    </Select.Option>
-                                                )
-                                            )}
-                                        </Select.List>
-                                    </Select>
-                                </div>
-                            </div>
                             <div className="flex justify-stretch items-center gap-2">
-                                <Button
-                                    className="grow"
-                                    color={
-                                        stateProcess === STATE_PROCESS.RUNNING
-                                            ? "warning"
-                                            : stateProcess ===
-                                              STATE_PROCESS.PAUSE
-                                            ? "success"
-                                            : "info"
-                                    }
-                                    onClick={handleProcess}
-                                    disabled={
-                                        stateProcess === STATE_PROCESS.RUNNING
-                                    }
-                                >
-                                    {stateProcess === STATE_PROCESS.RUNNING ? (
-                                        <PauseIcon className="size-4 mr-1" />
-                                    ) : (
-                                        <PlayIcon className="size-4 mr-1" />
-                                    )}
-                                    {stateProcess === STATE_PROCESS.RUNNING
-                                        ? "Pause"
-                                        : stateProcess === STATE_PROCESS.PAUSE
-                                        ? "Resume"
-                                        : "Start"}
-                                </Button>
                                 <Button
                                     className="grow"
                                     disabled={containerJson.length === 0}
@@ -395,6 +284,15 @@ export default function App() {
                                 >
                                     <DownloadIcon className="size-4 mr-1" />
                                     Download All
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    color="error"
+                                    className="grow"
+                                    onClick={handleRemoveZeroText}
+                                >
+                                    <TrashIcon className="size-4 mr-1 text-error" />
+                                    Remove No Text
                                 </Button>
                             </div>
                         </div>

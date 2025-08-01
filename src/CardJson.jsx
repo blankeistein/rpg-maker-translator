@@ -1,7 +1,20 @@
-import { Card, IconButton, Typography } from "@material-tailwind/react";
-import { DownloadIcon, FileJson, XCircleIcon } from "lucide-react";
-import { memo } from "react";
-import { bytesToKB } from "./utils";
+import {
+    Card,
+    IconButton,
+    Progress,
+    Typography,
+} from "@material-tailwind/react";
+import Bottleneck from "bottleneck";
+import { DownloadIcon, FileJson, Languages, XCircleIcon } from "lucide-react";
+import { memo, useMemo, useRef, useState } from "react";
+import {
+    extractTextsFromJson,
+    setTextInJson,
+    translateWithLingva,
+} from "./translator/rpgm";
+import { bytesToKB, readFileAsText } from "./utils";
+
+const MAX_CONCURRENT = 5;
 
 const CardJson = memo(function ({
     index,
@@ -10,8 +23,18 @@ const CardJson = memo(function ({
     size,
     textCount,
     translatedFile,
+    download,
+    onUpdate,
     onDelete,
 }) {
+    const [state, setState] = useState(false);
+    const [downloadProgress, setDownloadProgress] = useState(0);
+    const translateTextQueue = useRef(
+        new Bottleneck({
+            maxConcurrent: MAX_CONCURRENT,
+            minTime: 100,
+        })
+    );
     const handleRemoveFile = () => {
         onDelete(index);
     };
@@ -23,10 +46,71 @@ const CardJson = memo(function ({
         downloadLink.click();
     };
 
+    const translateProcess = async () => {
+        setState(true);
+        const readFile = await readFileAsText(file);
+        const json = JSON.parse(readFile);
+
+        const texts = extractTextsFromJson(json);
+
+        let count = 0;
+        for (const text of texts) {
+            translateTextQueue.current
+                .schedule(async () => {
+                    const translatedText = await translateWithLingva(
+                        text.text,
+                        {
+                            source: "auto",
+                            target: "id",
+                        }
+                    );
+                    return translatedText;
+                })
+                .then((result) => {
+                    count++;
+                    setTextInJson(json, text.path, result);
+                    setDownloadProgress((prev) => prev + 1);
+                })
+                .catch((error) => console.error(error));
+        }
+        let intervalId;
+
+        intervalId = setInterval(() => {
+            console.log("Check queue");
+            if (translateTextQueue.current.empty()) {
+                const stringJson = JSON.stringify(json);
+                const newFile = new File([stringJson], file.name, {
+                    type: "application/json",
+                });
+                onUpdate(index, {
+                    translatedFile: newFile,
+                });
+
+                setState(false);
+                console.log("Done");
+
+                clearInterval(intervalId);
+            }
+        }, 1000);
+    };
+
+    const percentage = useMemo(() => {
+        return Math.round((downloadProgress / textCount) * 100);
+    }, [downloadProgress]);
+
     return (
         <Card className="relative flex flex-col min-h-[240px]">
             <Card.Header className="flex flex-col grow">
                 <div className="flex justify-end gap-1 mb-1">
+                    {!translatedFile && (
+                        <IconButton
+                            variant="ghost"
+                            onClick={translateProcess}
+                            disabled={state}
+                        >
+                            <Languages className="text-info" />
+                        </IconButton>
+                    )}
                     <IconButton
                         variant="ghost"
                         disabled={Boolean(!translatedFile)}
@@ -48,21 +132,17 @@ const CardJson = memo(function ({
                 <br />
                 <Typography type="small">Size: {bytesToKB(size)} KB</Typography>
             </Card.Body>
-            {/* <Card.Footer>
-                                              <Progress
-                                                  color="primary"
-                                                  value={50}
-                                              >
-                                                  <Progress.Bar className="flex items-center justify-center">
-                                                      <Typography
-                                                          type="small"
-                                                          color="secondary"
-                                                      >
-                                                          50%
-                                                      </Typography>
-                                                  </Progress.Bar>
-                                              </Progress>
-                                          </Card.Footer> */}
+            {(state || downloadProgress > 0) && (
+                <Card.Footer>
+                    <Progress color="primary" value={percentage}>
+                        <Progress.Bar className="flex items-center justify-center">
+                            <Typography type="small" color="secondary">
+                                {percentage}%
+                            </Typography>
+                        </Progress.Bar>
+                    </Progress>
+                </Card.Footer>
+            )}
         </Card>
     );
 });
