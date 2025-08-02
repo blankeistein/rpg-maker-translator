@@ -18,23 +18,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Toaster } from "react-hot-toast";
 import CardJson from "./CardJson";
+import useOptionsTranslate from "./stores/useOptionsTranslate";
 import languages from "./translator/languages";
 import { extractTextsFromJson } from "./translator/rpgm";
 import { readFileAsText } from "./utils";
 
-const STATE_PROCESS = {
-    START: 0,
-    RUNNING: 1,
-    PAUSE: 2,
-};
-
 export default function App() {
     const [containerJson, setContainerJson] = useState([]);
     const [darkMode, setDarkMode] = useState(false);
-    const [options, setOptions] = useState({
-        source: "auto",
-        target: "",
-    });
+    // const [options, setOptions] = useState({
+    //     source: "auto",
+    //     target: "",
+    // });
+
+    const { source, target, setTarget, setSource } = useOptionsTranslate();
 
     const onDrop = useCallback(async (acceptedFile) => {
         const files = await Promise.all(
@@ -167,14 +164,8 @@ export default function App() {
                                     Source
                                 </Typography>
                                 <Select
-                                    value={options.source}
-                                    onValueChange={(value) => {
-                                        console.log(value);
-                                        setOptions((prev) => ({
-                                            ...prev,
-                                            source: value,
-                                        }));
-                                    }}
+                                    value={source}
+                                    onValueChange={(value) => setSource(value)}
                                 >
                                     <Select.Trigger
                                         id="sourceLang"
@@ -204,13 +195,8 @@ export default function App() {
                                     Target
                                 </Typography>
                                 <Select
-                                    value={options.target}
-                                    onValueChange={(value) =>
-                                        setOptions((prev) => ({
-                                            ...prev,
-                                            target: value,
-                                        }))
-                                    }
+                                    value={target}
+                                    onValueChange={(value) => setTarget(value)}
                                 >
                                     <Select.Trigger
                                         id="targetLang"

@@ -7,6 +7,7 @@ import {
 import Bottleneck from "bottleneck";
 import { DownloadIcon, FileJson, Languages, XCircleIcon } from "lucide-react";
 import { memo, useMemo, useRef, useState } from "react";
+import useOptionsTranslate from "./stores/useOptionsTranslate";
 import {
     extractTextsFromJson,
     setTextInJson,
@@ -27,6 +28,8 @@ const CardJson = memo(function ({
     onUpdate,
     onDelete,
 }) {
+    const { source, target } = useOptionsTranslate();
+
     const [state, setState] = useState(false);
     const [downloadProgress, setDownloadProgress] = useState(0);
     const translateTextQueue = useRef(
@@ -60,8 +63,8 @@ const CardJson = memo(function ({
                     const translatedText = await translateWithLingva(
                         text.text,
                         {
-                            source: "auto",
-                            target: "id",
+                            source,
+                            target,
                         }
                     );
                     return translatedText;
@@ -76,7 +79,6 @@ const CardJson = memo(function ({
         let intervalId;
 
         intervalId = setInterval(() => {
-            console.log("Check queue");
             if (translateTextQueue.current.empty()) {
                 const stringJson = JSON.stringify(json);
                 const newFile = new File([stringJson], file.name, {
